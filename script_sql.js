@@ -10,7 +10,7 @@ const dbConfig = {
   host: 'localhost',
   user: 'root',
   password: 'root123',
-  database: 'domain_downloads'
+  database: 'domain_downloads2'
 };
 
 // Automatically create the database and table if not exist
@@ -27,13 +27,14 @@ async function setupDatabase() {
   await connection.changeUser({ database: dbConfig.database });
 
   const createTableSQL = `
-    CREATE TABLE IF NOT EXISTS downloads (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      download_date DATE NOT NULL,
-      file_data LONGTEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `;
+  CREATE TABLE IF NOT EXISTS downloads (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    extracted_date DATE NOT NULL,
+    file_data TEXT NOT NULL
+  );
+`;
+
+
   await connection.execute(createTableSQL);
   console.log("Table 'downloads' is ready.");
 
@@ -41,14 +42,19 @@ async function setupDatabase() {
 }
 
 // Save extracted text data into MySQL
-async function saveDownloadData(fileText) {
-  const connection = await mysql.createConnection(dbConfig);
-  const today = new Date().toISOString().split('T')[0];
-  const sql = `INSERT INTO downloads (download_date, file_data) VALUES (?, ?)`;
-  await connection.execute(sql, [today, fileText]);
-  console.log(`Saved extracted text for ${today}`);
-  await connection.end();
-}
+  async function saveDownloadData(fileLines) {
+    const connection = await mysql.createConnection(dbConfig);
+    const sql = `INSERT INTO downloads (file_data, extracted_date) VALUES (?, ?)`;
+    const today = new Date().toISOString().split('T')[0];
+
+    for (const line of fileLines) {
+      await connection.execute(sql, [line, today]);
+    }
+
+    console.log(`Saved ${fileLines.length} rows with extracted_date = ${today}`);
+    await connection.end();
+  }
+
 
 // Get most recently modified file
 async function getLatestFile(directory) {
@@ -69,7 +75,7 @@ async function getLatestFile(directory) {
   return path.join(directory, latestFile);
 }
 
-// Extract text from zip file
+// Extract text from zip file and return an array of lines
 async function extractTextFromZip(zipPath) {
   const directory = await unzipper.Open.file(zipPath);
   const textFiles = directory.files.filter(file => file.path.endsWith('.txt'));
@@ -80,8 +86,17 @@ async function extractTextFromZip(zipPath) {
 
   const file = textFiles[0];
   const content = await file.buffer(); // Buffer object
-  return content.toString('utf8');     // Convert buffer to string
+
+  // Split by newlines and clean each line
+  const lines = content
+    .toString('utf8')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line.length > 0); // Remove empty lines
+
+  return lines; // Array of clean, non-empty lines
 }
+
 
 // Scraper + Downloader + Save extracted text
 async function runScraper() {
